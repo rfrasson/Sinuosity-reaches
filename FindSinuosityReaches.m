@@ -188,5 +188,17 @@ function [ReachBoundaries,ReachLength]=FindSinuosityReaches(RiverObs,SWATHbounda
         ylabel('Sinuosity') % left y-axis
         xlabel('Flow distance in km')
         legend('Sinuosity','Reach boundaries', 'Location', 'northeast')
+        
+        figure(3)
+        plot(D./1000,Dsdr)
+        hold on
+        plot(Dbound,Dsdr(ReachBoundaries),'o',...
+                           'MarkerEdgeColor','b',...
+                           'MarkerFaceColor','b',...
+                           'MarkerSize',6)
+
+        ylabel('Rate of change of S with respect to flow distance') % left y-axis
+        xlabel('Flow distance in km')
+        legend('dS/dX','Reach boundaries', 'Location', 'northeast')
     end
 end

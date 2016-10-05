@@ -1,5 +1,6 @@
-%River='Sacramento'; 
-River='PoDS'; %downstream section of the Po River
+clear
+River='Sacramento'; 
+%River='PoDS'; %downstream section of the Po River
 %River='Po'; %upstream section of the Po River
 pathtodata=['./RawData/' River '/'];
 MinReachLen=5; 
@@ -43,6 +44,6 @@ RefRiverObs=RiverObs;
 RefTrue=True;
 
 [ReachBoundaries,ReachLength]=FindSinuosityReaches(RefRiverObs,SWATHboundaries,lambda,MinReachLen,tcritReach,numbregresspts,Makeplots);
-
+Dams=[]; %unless indices of nodes containing Dams is known
 load(filenameDataset,'RiverObs','True');
-[Reach,RiverData,Metadata,ReachTrue,Nodes,NodesTrue]=ReachAveraging(ReachBoundaries, RiverObs,True,RefRiverObs,RefTrue,ReachLength,Day,SaveResults,SmoothData,VariableSmoothingWindow,OutputPath, OutFileName,Makeplots);
+[Reach,RiverData,Metadata,ReachTrue,Nodes,NodesTrue]=ReachAveraging(ReachBoundaries, Dams, RiverObs,True,RefRiverObs,RefTrue,Day,SaveResults,SmoothData,VariableSmoothingWindow,OutputPath, OutFileName,Makeplots);

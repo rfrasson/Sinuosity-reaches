@@ -1,7 +1,8 @@
-function [Reach,RiverData,Metadata,ReachTrue,Nodes,NodesTrue]=ReachAveraging(ReachBoundaries, RiverObs,True,RefRiverObs,RefTrue,ReachLength,Day,SaveResults,SmoothData,VariableSmoothingWindow,OutputPath, OutFileName,MakePlots)
+function [Reach,RiverData,Metadata,ReachTrue,Nodes,NodesTrue]=ReachAveraging(ReachBoundaries, Dams, RiverObs,True,RefRiverObs,RefTrue,Day,SaveResults,SmoothData,VariableSmoothingWindow,OutputPath, OutFileName,MakePlots)
 %this function calculates reach-averaged quantities. 
 %List of inputs
 %ReachBoundaries     : Node ids of reach boundaries
+%Dams                : Node indices of the location of dams
 %RiverObs nodes      : Structure containing RiverObs nodes of the day the
 %                      user intends to calculate reach-averaged quantities
 %                      (see explanation of the structure below)
@@ -17,16 +18,17 @@ function [Reach,RiverData,Metadata,ReachTrue,Nodes,NodesTrue]=ReachAveraging(Rea
 %RefTrue             : true values during the reference overpass. Same
 %                      format as RiverObs
 %
+%Day                 : Day of the year that you are running.
+%
+%SaveResults         : 1 will save results.
+%
+%SmootData           : 1 will perform smoothing. Either variable window or
+%                      guassian
 
-%ReachLength         : length of each reach in km
-
-%SmoothData          : Smooths data using a moving average Gaussian window.
-%                      Further configurations follows
-
-%VariableSmoothingWindow  : %0 will not use gaussian window
-%                           1 will use variable size window 
-%                           2 will use the standard window size of 10km
-
+%VariableSmoothingWindow  : % 1 will use variable size window
+%                             2 will use 10km window with std 2km
+%                           
+%
 %OutputPath          :Path to the output directory (including final /)
 
 %OutFileName         :output file name
@@ -55,10 +57,6 @@ function [Reach,RiverData,Metadata,ReachTrue,Nodes,NodesTrue]=ReachAveraging(Rea
 %Lat        : Latitude of the node in decimal degrees
 %Lon        : Longitude of the node in decimal degrees
 %xtrack     : cross-track position of the node
-
-
-
-
 
     %% Reach averaging and discharge calculations
     WindowSize=10;
@@ -162,8 +160,7 @@ function [Reach,RiverData,Metadata,ReachTrue,Nodes,NodesTrue]=ReachAveraging(Rea
     NodesTrue.x=x;
     NodesTrue.y=ytrueInt;
     NodesTrue.w=wtrueInt;
-    
-    
+      
     yave=zeros(size(y));
     wave=zeros(size(y));
     yaveRef=zeros(size(y));
@@ -173,41 +170,66 @@ function [Reach,RiverData,Metadata,ReachTrue,Nodes,NodesTrue]=ReachAveraging(Rea
     counter=1;
     countery=0;
     counterSlope=1;
-    ReachNum=length(ReachLength);
+    NumberReaches=0;
     if SmoothData==1
         originaly= y;
         if VariableSmoothingWindow==1
-            for countReaches=1:ReachNum
+            for countReaches=1:length(ReachBoundaries)-1
                 %Smooth y and w
                 %for each reach, I'm using ReachLength as the size of the
                 %moving average window. That does NOT limit the averaging
                 %window to reach boundaries, only how far the window extends
                 r1=ReachBoundaries(countReaches); %index of the first node belonging to the reach that is being smoothed
                 r2=ReachBoundaries(countReaches+1);%index of the last node belonging to the reach that is being smoothed
-                if countReaches>1
-                    re1=ReachBoundaries(countReaches-1); %begining of the upstream reach. those are used in the averaging process, but not saved.
+                if r2-r1>1
+                    %dams create boundaries that are offset by 1. There is
+                    %no need to produce avareges in a reach that contains 
+                    %2 nodes only
+                    NumberReaches=NumberReaches+1;
+                    if countReaches>1
+                        re1=ReachBoundaries(countReaches-1); %begining of the upstream reach. those are used in the averaging process, but not saved.
+                    else
+                        re1=r1;
+                    end
+                    if countReaches<length(ReachBoundaries)-1
+                        re2=ReachBoundaries(countReaches+2); %end of the downstream reach. those are used in the averaging process, but not saved.
+                    else
+                        re2=r2;
+                    end
+                    if ~isempty(Dams)
+                        %there are dams in this river need to check and
+                        %prevent averaging to cross Dams
+                        for countDams=1:length(Dams)
+                            if re1<=Dams(countDams) && r1>=Dams(countDams)
+                                re1=r1;
+                            end
+                            if re2>=Dams(countDams) && r2<=Dams(countDams)
+                                re2=r2;
+                            end
+                        end
+                    end
+                    WS = x(r2)-x(r1);%window size equal to the current reach's length
+                    NewSigma=WS/5; %for a 10km window, we want a 2km standard deviation for the Gaussian averaging window. Keep mininum at 1km, which is about 3 nodes
+                    if NewSigma < 1
+                        NewSigma =1;
+                    end
+                    Coef1=polyfit(x(re1:re2),y(re1:re2),1);
+                    slope=Coef1(1);
+                    ydetrended=y(re1:re2)-slope*(x(re1:re2)-x(re1));
+                    [ynew, wnew] = GaussianAveraging(x(re1:re2),ydetrended,w(re1:re2),WS,NewSigma);   
+                    ynew=ynew+slope*(x(re1:re2)-x(re1));
+                    yave(r1:r2)=ynew(r1-re1+1:r2-re1+1);%saves the averaged ys for the current reach only
+                    wave(r1:r2)=wnew(r1-re1+1:r2-re1+1);
+                    Coef1=polyfit(x(re1:re2),refy(re1:re2),1);
+                    slope=Coef1(1);
+                    refydetrended=refy(re1:re2)-slope*(x(re1:re2)-x(re1));
+                    [ynew, wnew] = GaussianAveraging(x(re1:re2),refydetrended,refw(re1:re2),WS,NewSigma);
+                    ynew=ynew+slope*(x(re1:re2)-x(re1));
+                    yaveRef(r1:r2)=ynew(r1-re1+1:r2-re1+1);
+                    waveRef(r1:r2)=wnew(r1-re1+1:r2-re1+1);
                 else
-                    re1=r1;
+                    %nothing to do.
                 end
-                if countReaches<ReachNum
-                    re2=ReachBoundaries(countReaches+2); %end of the downstream reach. those are used in the averaging process, but not saved.
-                else
-                    re2=r2;
-                end
-                WS = ReachLength(countReaches);%window size equal to the current reach's length
-%                 if WS>10
-%                     WS=10;
-%                 end
-                NewSigma=WS/5; %for a 10km window, we want a 2km standard deviation for the Gaussian averaging window. Keep mininum at 1km, which is about 3 nodes
-                if NewSigma < 1
-                    NewSigma =1;
-                end
-                [ynew, wnew] = GaussianAveraging(x(re1:re2),y(re1:re2),w(re1:re2),WS,NewSigma);            
-                yave(r1:r2)=ynew(r1-re1+1:r2-re1+1);%saves the averaged ys for the current reach only
-                wave(r1:r2)=wnew(r1-re1+1:r2-re1+1);
-                [ynew, wnew] = GaussianAveraging(x(re1:re2),refy(re1:re2),refw(re1:re2),WS,NewSigma);
-                yaveRef(r1:r2)=ynew(r1-re1+1:r2-re1+1);
-                waveRef(r1:r2)=wnew(r1-re1+1:r2-re1+1);
             end
         else
             if VariableSmoothingWindow==2
@@ -227,10 +249,14 @@ function [Reach,RiverData,Metadata,ReachTrue,Nodes,NodesTrue]=ReachAveraging(Rea
         waveRef=refw;
     end
     
+    if SmoothData==1
+        Nodes.ysmooth=yave;
+        Nodes.wsmooth=wave;
+    end   
    
 
     %RMSE for height
-    sqdiff=(y-ytrueInt).^2;
+    sqdiff=(yave-ytrueInt).^2;
     rmseReachHeight=sqrt(mean(sqdiff));
     Output=sprintf('RMSE for water surface elevation = %0.5g m',rmseReachHeight);
     display(Output)
@@ -242,66 +268,59 @@ function [Reach,RiverData,Metadata,ReachTrue,Nodes,NodesTrue]=ReachAveraging(Rea
         slope(count)=-(yave(count)-yave(count-1))/(x(count)-x(count-1));
         trueslope(count)=-(ytrueInt(count)-ytrueInt(count-1))/(x(count)-x(count-1));
     end
-
-
-    %xreach=FlowDist(ReachBoundaries);
+    
     xreach=x(ReachBoundaries);
-    sizexreach=size(xreach);
-    sizexreach(1)=sizexreach(1)-1;
-    xmid=zeros(sizexreach);
-    trueReachslope=zeros(sizexreach);
-    Reachslope=zeros(sizexreach);
-    Reachy=zeros(sizexreach);
-    Reachw=zeros(sizexreach);
-    ReachA=zeros(sizexreach);
-    ReachL=zeros(sizexreach);
-    ReachyRef=zeros(sizexreach);
-    ReachwRef=zeros(sizexreach);
-    TrueReachw=zeros(sizexreach);
-    TrueReachy=zeros(sizexreach);
-    TrueReachA=zeros(sizexreach);
-    TrueReachQ=zeros(sizexreach);
-    TrueReachN=zeros(sizexreach);
-    RefTrueReachy=zeros(sizexreach);
-    RefTrueReachw=zeros(sizexreach);
-    TrueReachA0=zeros(sizexreach);
-
-    first=1;
-    for count=1:length(xreach)-1
-        xmid(count)=(xreach(count)+xreach(count+1))/2;
-        last = first;
-        while x(last)< xreach(count+1) && last <length(x)
-            last = last +1;
+    xmid=zeros(NumberReaches,1);
+    trueReachslope=zeros(NumberReaches,1);
+    Reachslope=zeros(NumberReaches,1);
+    Reachy=zeros(NumberReaches,1);
+    Reachw=zeros(NumberReaches,1);
+    ReachA=zeros(NumberReaches,1);
+    ReachL=zeros(NumberReaches,1);
+    ReachyRef=zeros(NumberReaches,1);
+    ReachwRef=zeros(NumberReaches,1);
+    TrueReachw=zeros(NumberReaches,1);
+    TrueReachy=zeros(NumberReaches,1);
+    TrueReachA=zeros(NumberReaches,1);
+    TrueReachQ=zeros(NumberReaches,1);
+    TrueReachN=zeros(NumberReaches,1);
+    RefTrueReachy=zeros(NumberReaches,1);
+    RefTrueReachw=zeros(NumberReaches,1);
+    TrueReachA0=zeros(NumberReaches,1);
+    countReach=1;
+    for count=1:length(ReachBoundaries)-1
+        if ReachBoundaries(count+1)-ReachBoundaries(count)>1
+            %if ==1 then not a real reach, just a dam between the nodes
+            first=ReachBoundaries(count);
+            last=ReachBoundaries(count+1);
+            xmid(countReach)=(x(last)+x(first))/2;
+            trueReachslope(countReach)=-(ytrueInt(last)-ytrueInt(first))/(x(last)-x(first));
+            TrueReachy(countReach)=mean(ytrueInt(first:last));
+            TrueReachw(countReach)=mean(wtrueInt(first:last));
+            TrueReachA(countReach)=mean(trueAInt(first:last));
+            TrueReachA0(countReach)=mean(refTrueAInt(first:last));
+            RefTrueReachy(countReach)=mean(refytrueInt(first:last)); %reference day
+            RefTrueReachw(countReach)=mean(refwtrueInt(first:last));
+            if calculateQ==1
+                TrueReachQ(countReach)=mean(TrueQInt(first:last));
+                TrueReachN(countReach)=TrueReachA(countReach)^(5/3)*TrueReachw(countReach)^(-2/3)*(trueReachslope(countReach)/1000)^(1/2)/TrueReachQ(countReach);
+            end
+            Reachslope(countReach)=-(yave(last)-yave(first))/(x(last)-x(first));
+            Reachy(countReach)=mean(yave(first:last));
+            Reachw(countReach)=mean(wave(first:last));
+            ReachyRef(countReach)=mean(yaveRef(first:last));
+            ReachwRef(countReach)=mean(waveRef(first:last));
+            ReachL(countReach)=x(last)-x(first);
+            countReach=countReach+1;
         end
-        last=last-1;
-
-        trueReachslope(count)=-(ytrueInt(last)-ytrueInt(first))/(x(last)-x(first));
-        TrueReachy(count)=mean(ytrueInt(first:last));
-        TrueReachw(count)=mean(wtrueInt(first:last));
-        TrueReachA(count)=mean(trueAInt(first:last));
-        TrueReachA0(count)=mean(refTrueAInt(first:last));
-        RefTrueReachy(count)=mean(refytrueInt(first:last)); %reference day
-        RefTrueReachw(count)=mean(refwtrueInt(first:last));
-        if calculateQ==1
-            TrueReachQ(count)=mean(TrueQInt(first:last));
-            TrueReachN(count)=TrueReachA(count)^(5/3)*TrueReachw(count)^(-2/3)*(trueReachslope(count)/1000)^(1/2)/TrueReachQ(count);
-        end
-
-        Reachslope(count)=-(yave(last)-yave(first))/(x(last)-x(first));
-        Reachy(count)=mean(yave(first:last));
-        Reachw(count)=mean(wave(first:last));
-        ReachyRef(count)=mean(yaveRef(first:last));
-        ReachwRef(count)=mean(waveRef(first:last));
-        ReachL(count)=x(last)-x(first);
-        first=last+1;
     end
 
     diffslope=(100*Reachslope-100*trueReachslope);
-    rmseReachSlope=sqrt(mean(diffslope.^2));
+    rmseReachSlope=sqrt(mean(diffslope(ReachL>2).^2));
     Output=sprintf('RMSE for reach slope = %0.5g cm/km',rmseReachSlope);
     display(Output)
     if MakePlots==1
-        figure(3)    
+        figure%(3)    
         plot(x,y,'--b')
         hold on
         plot(x,yave,'-r')
@@ -327,8 +346,6 @@ function [Reach,RiverData,Metadata,ReachTrue,Nodes,NodesTrue]=ReachAveraging(Rea
         ylabel('Reach averaged slope m/km')
         xlabel('Flow distance')
     end
-    
-
 
     if calculateQ==1
         ReachA=TrueReachA0+(Reachy-ReachyRef).*(ReachwRef+Reachw)/2;
