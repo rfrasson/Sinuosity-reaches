@@ -1,8 +1,10 @@
-function [Reach,RiverData,Metadata,ReachTrue,Nodes,NodesTrue]=ReachAveraging(ReachBoundaries, Dams, RiverObs,True,RefRiverObs,RefTrue,Day,SaveResults,SmoothData,VariableSmoothingWindow,OutputPath, OutFileName,MakePlots)
+function [Reach,RiverData,Metadata,ReachTrue,Nodes,NodesTrue]=ReachAveraging(ReachBoundaries, Dams, StructureFlag ,RiverObs,True,RefRiverObs,RefTrue,Day,SaveResults,SmoothData,VariableSmoothingWindow,OutputPath, OutFileName,MakePlots)
 %this function calculates reach-averaged quantities. 
 %List of inputs
 %ReachBoundaries     : Node ids of reach boundaries
 %Dams                : Node indices of the location of dams
+%StructureFlag       : Flag that indicates if ReachBoundary is influenced
+%                      by a Structure
 %RiverObs nodes      : Structure containing RiverObs nodes of the day the
 %                      user intends to calculate reach-averaged quantities
 %                      (see explanation of the structure below)
@@ -181,11 +183,41 @@ function [Reach,RiverData,Metadata,ReachTrue,Nodes,NodesTrue]=ReachAveraging(Rea
                 %window to reach boundaries, only how far the window extends
                 r1=ReachBoundaries(countReaches); %index of the first node belonging to the reach that is being smoothed
                 r2=ReachBoundaries(countReaches+1);%index of the last node belonging to the reach that is being smoothed
+                if StructureFlag(countReaches)==1 && StructureFlag(countReaches+1)==1
+                    %If both boundaries are marked by StructureFlag, the reach is 
+                    %a buffer around a hydraulic structure. H, W, S are
+                    %deemed unreliable and can be disconsidered.
+                    if StructureFlag(countReaches-1)==0
+                        %buffer upstream from dam. Begin the window
+                        %at the reach upstream from buffer and end at the
+                        % node immediatelly upstream from the dam. not more than 10km
+                        WS = x(r2)-x(ReachBoundaries(countReaches-1));%window size equal to the current reach's length                  
+                    else
+                        if StructureFlag(countReaches+2)==0
+                            %buffer downstream from dam, so begin at the first
+                            %reach upstream from dam (r1) and end at the
+                            %end of the next reach not more than 10km
+                            WS = x(ReachBoundaries(countReaches+2))-x(r1);%window size equal to the current reach's length
+                        else
+                            %r2 and r1 are adjacent with dam in between
+                            WS=0;
+                        end
+                    end
+                    if WS>10
+                        WS=10;
+                    end
+                else
+                    NumberReaches=NumberReaches+1;
+                    WS = x(r2)-x(r1);%window size equal to the current reach's length
+                end
+                NewSigma=WS/5; %for a 10km window, we want a 2km standard deviation for the Gaussian averaging window. Keep mininum at 1km, which is about 3 nodes
+                if NewSigma < 1
+                    NewSigma =1;
+                end
                 if r2-r1>1
                     %dams create boundaries that are offset by 1. There is
                     %no need to produce avareges in a reach that contains 
                     %2 nodes only
-                    NumberReaches=NumberReaches+1;
                     if countReaches>1
                         re1=ReachBoundaries(countReaches-1); %begining of the upstream reach. those are used in the averaging process, but not saved.
                     else
@@ -207,11 +239,6 @@ function [Reach,RiverData,Metadata,ReachTrue,Nodes,NodesTrue]=ReachAveraging(Rea
                                 re2=r2;
                             end
                         end
-                    end
-                    WS = x(r2)-x(r1);%window size equal to the current reach's length
-                    NewSigma=WS/5; %for a 10km window, we want a 2km standard deviation for the Gaussian averaging window. Keep mininum at 1km, which is about 3 nodes
-                    if NewSigma < 1
-                        NewSigma =1;
                     end
                     Coef1=polyfit(x(re1:re2),y(re1:re2),1);
                     slope=Coef1(1);
@@ -253,8 +280,6 @@ function [Reach,RiverData,Metadata,ReachTrue,Nodes,NodesTrue]=ReachAveraging(Rea
         Nodes.ysmooth=yave;
         Nodes.wsmooth=wave;
     end   
-   
-
     %RMSE for height
     sqdiff=(yave-ytrueInt).^2;
     rmseReachHeight=sqrt(mean(sqdiff));
@@ -289,7 +314,11 @@ function [Reach,RiverData,Metadata,ReachTrue,Nodes,NodesTrue]=ReachAveraging(Rea
     TrueReachA0=zeros(NumberReaches,1);
     countReach=1;
     for count=1:length(ReachBoundaries)-1
-        if ReachBoundaries(count+1)-ReachBoundaries(count)>1
+        if StructureFlag(count)==1 && StructureFlag(count+1)==1
+            %Both Boundaries are flagged as inside the area of influence of
+            %a strucutre. Disregard reach.
+        else
+        %if ReachBoundaries(count+1)-ReachBoundaries(count)>1
             %if ==1 then not a real reach, just a dam between the nodes
             first=ReachBoundaries(count);
             last=ReachBoundaries(count+1);
@@ -349,7 +378,6 @@ function [Reach,RiverData,Metadata,ReachTrue,Nodes,NodesTrue]=ReachAveraging(Rea
 
     if calculateQ==1
         ReachA=TrueReachA0+(Reachy-ReachyRef).*(ReachwRef+Reachw)/2;
-        %ReachA=TrueReachA0+(Reachy-RefTrueReachy).*(RefTrueReachw+Reachw)/2;
         ReachQ=TrueReachN.^(-1).*ReachA.^(5/3).*Reachw.^(-2/3).*(Reachslope/1000).^0.5;
         diffA=(ReachA-TrueReachA);
         diffQ=(ReachQ-TrueReachQ);
