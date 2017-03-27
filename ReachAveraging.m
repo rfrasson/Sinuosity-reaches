@@ -64,7 +64,8 @@ function [Reach,RiverData,Metadata,ReachTrue,Nodes,NodesTrue]=ReachAveraging(Rea
     WindowSize=10;
     sigma=2;
     calculateQ=1; %1 estimates Q for each reach
-
+    WidthCalculation=2; %1 calculates average width from simply averaging the nodes.
+    %2 estimates reach averaged widths from innundation area/reach length
 
     x=RiverObs.x/1000;
     y=RiverObs.H;
@@ -168,7 +169,7 @@ function [Reach,RiverData,Metadata,ReachTrue,Nodes,NodesTrue]=ReachAveraging(Rea
     yaveRef=zeros(size(y));
     waveRef=zeros(size(y));
     slope=zeros(size(y));
-    trueslope=zeros(size(ytrue));
+    trueslope=zeros(size(y));
     counter=1;
     countery=0;
     counterSlope=1;
@@ -177,7 +178,7 @@ function [Reach,RiverData,Metadata,ReachTrue,Nodes,NodesTrue]=ReachAveraging(Rea
         originaly= y;
         if VariableSmoothingWindow==1
             for countReaches=1:length(ReachBoundaries)-1
-                %Smooth y and w
+                %Smooth y
                 %for each reach, I'm using ReachLength as the size of the
                 %moving average window. That does NOT limit the averaging
                 %window to reach boundaries, only how far the window extends
@@ -240,20 +241,24 @@ function [Reach,RiverData,Metadata,ReachTrue,Nodes,NodesTrue]=ReachAveraging(Rea
                             end
                         end
                     end
-                    Coef1=polyfit(x(re1:re2),y(re1:re2),1);
+                    xsub=x(re1:re2);
+                    ysub=y(re1:re2);                   
+                    Coef1=polyfit(xsub(~isnan(ysub)),ysub(~isnan(ysub)),1);
                     slope=Coef1(1);
                     ydetrended=y(re1:re2)-slope*(x(re1:re2)-x(re1));
-                    [ynew, wnew] = GaussianAveraging(x(re1:re2),ydetrended,w(re1:re2),WS,NewSigma);   
+                    [ynew, ~] = GaussianAveraging(x(re1:re2),ydetrended,w(re1:re2),WS,NewSigma);   
                     ynew=ynew+slope*(x(re1:re2)-x(re1));
                     yave(r1:r2)=ynew(r1-re1+1:r2-re1+1);%saves the averaged ys for the current reach only
-                    wave(r1:r2)=wnew(r1-re1+1:r2-re1+1);
+                    %wave(r1:r2)=wnew(r1-re1+1:r2-re1+1);
+                    wave(r1:r2)=w(r1:r2); %don't smooth widths
                     Coef1=polyfit(x(re1:re2),refy(re1:re2),1);
                     slope=Coef1(1);
                     refydetrended=refy(re1:re2)-slope*(x(re1:re2)-x(re1));
-                    [ynew, wnew] = GaussianAveraging(x(re1:re2),refydetrended,refw(re1:re2),WS,NewSigma);
+                    [ynew, ~] = GaussianAveraging(x(re1:re2),refydetrended,refw(re1:re2),WS,NewSigma);
                     ynew=ynew+slope*(x(re1:re2)-x(re1));
                     yaveRef(r1:r2)=ynew(r1-re1+1:r2-re1+1);
-                    waveRef(r1:r2)=wnew(r1-re1+1:r2-re1+1);
+                    %waveRef(r1:r2)=wnew(r1-re1+1:r2-re1+1);
+                    waveRef(r1:r2)=refw(r1:r2);%don't smooth widths
                 else
                     %nothing to do.
                 end
@@ -261,8 +266,10 @@ function [Reach,RiverData,Metadata,ReachTrue,Nodes,NodesTrue]=ReachAveraging(Rea
         else
             if VariableSmoothingWindow==2
                 %10km window            
-                [yave, wave] = GaussianAveraging(x, y,w,WindowSize,sigma);
-                [yaveRef, waveRef] = GaussianAveraging(x, refy,refw,WindowSize,sigma);
+                [yave, ~] = GaussianAveraging(x, y,w,WindowSize,sigma);
+                wave=w;
+                [yaveRef, ~] = GaussianAveraging(x, refy,refw,WindowSize,sigma);
+                waveRef=refw; %no smoothing for w
             else
                 %no averaging!!
                 yave=y;
@@ -318,28 +325,55 @@ function [Reach,RiverData,Metadata,ReachTrue,Nodes,NodesTrue]=ReachAveraging(Rea
             %Both Boundaries are flagged as inside the area of influence of
             %a strucutre. Disregard reach.
         else
-        %if ReachBoundaries(count+1)-ReachBoundaries(count)>1
-            %if ==1 then not a real reach, just a dam between the nodes
             first=ReachBoundaries(count);
             last=ReachBoundaries(count+1);
-            xmid(countReach)=(x(last)+x(first))/2;
-            trueReachslope(countReach)=-(ytrueInt(last)-ytrueInt(first))/(x(last)-x(first));
-            TrueReachy(countReach)=mean(ytrueInt(first:last));
-            TrueReachw(countReach)=mean(wtrueInt(first:last));
-            TrueReachA(countReach)=mean(trueAInt(first:last));
-            TrueReachA0(countReach)=mean(refTrueAInt(first:last));
-            RefTrueReachy(countReach)=mean(refytrueInt(first:last)); %reference day
-            RefTrueReachw(countReach)=mean(refwtrueInt(first:last));
-            if calculateQ==1
-                TrueReachQ(countReach)=mean(TrueQInt(first:last));
-                TrueReachN(countReach)=TrueReachA(countReach)^(5/3)*TrueReachw(countReach)^(-2/3)*(trueReachslope(countReach)/1000)^(1/2)/TrueReachQ(countReach);
+            xmid(countReach,1)=(x(last)+x(first))/2;
+            trueReachslope(countReach,1)=-(ytrueInt(last)-ytrueInt(first))/(x(last)-x(first));
+            TrueReachy(countReach,1)=mean(ytrueInt(first:last));
+            if WidthCalculation==1
+              TrueReachw(countReach,1)=nanmean(wtrueInt(first:last));
+              Reachw(countReach,1)=nanmean(wave(first:last));
+              RefTrueReachw(countReach,1)=nanmean(refwtrueInt(first:last));
+              ReachwRef(countReach,1)=nanmean(waveRef(first:last));
+            elseif WidthCalculation==2
+                len=0;
+                InArea=0;
+                InAreaRef=0;
+                InAreaTrueRef=0;
+                InAreaTrue=0;
+                %replaces missing widths with interpolated widths for the calculation of inundated areas
+                wint=interp1(x(~isnan(wave)),wave(~isnan(wave)),x); 
+                wintRef=interp1(x(~isnan(waveRef)),waveRef(~isnan(waveRef)),x);
+                for counter=first+1:last
+                    %compute area between two successive nodes
+                    InArea=InArea+(wint(counter)+wint(counter-1))*(x(counter)-x(counter-1))/2;
+                    InAreaTrueRef=InAreaTrueRef+(refwtrueInt(counter)+refwtrueInt(counter-1))*(x(counter)-x(counter-1))/2;
+                    InAreaRef=InAreaRef+(wintRef(counter)+wintRef(counter-1))*(x(counter)-x(counter-1))/2;
+                    InAreaTrue=InAreaTrue+(wtrueInt(counter)+wtrueInt(counter-1))*(x(counter)-x(counter-1))/2;
+                    len=len+x(counter)-x(counter-1);
+                end
+                TrueReachw(countReach,1)=InAreaTrue/len;
+                Reachw(countReach,1)=InArea/len;
+                RefTrueReachw(countReach,1)=InAreaTrueRef/len;
+                ReachwRef(countReach,1)=InAreaRef/len;
             end
-            Reachslope(countReach)=-(yave(last)-yave(first))/(x(last)-x(first));
-            Reachy(countReach)=mean(yave(first:last));
-            Reachw(countReach)=mean(wave(first:last));
-            ReachyRef(countReach)=mean(yaveRef(first:last));
-            ReachwRef(countReach)=mean(waveRef(first:last));
-            ReachL(countReach)=x(last)-x(first);
+              
+            TrueReachA(countReach,1)=mean(trueAInt(first:last));
+            TrueReachA0(countReach,1)=mean(refTrueAInt(first:last));
+            RefTrueReachy(countReach,1)=mean(refytrueInt(first:last)); %reference day
+            if calculateQ==1
+                TrueReachQ(countReach,1)=mean(TrueQInt(first:last));
+                TrueReachN(countReach,1)=TrueReachA(countReach)^(5/3)*TrueReachw(countReach)^(-2/3)*(trueReachslope(countReach)/1000)^(1/2)/TrueReachQ(countReach);
+            end
+            if SmoothData~=1
+                Coef=polyfit(x(first:last),y(first:last),1);
+                Reachslope(countReach,1)=-Coef(1);
+            else               
+                Reachslope(countReach,1)=-(yave(last)-yave(first))/(x(last)-x(first));
+            end
+            Reachy(countReach,1)=mean(yave(first:last));
+            ReachyRef(countReach,1)=mean(yaveRef(first:last));
+            ReachL(countReach,1)=x(last)-x(first);
             countReach=countReach+1;
         end
     end
@@ -423,14 +457,14 @@ function [Reach,RiverData,Metadata,ReachTrue,Nodes,NodesTrue]=ReachAveraging(Rea
         %compute reach-averaged height and slope uncertainties, inundated area,
         %inundated area uncertainty (waiting on this one)
         for countreach=1:length(Reach.A)
-           xcoord=x(ReachBoundaries(countreach):ReachBoundaries(countreach+1))/1000;
-           yun=RiverObs.H(ReachBoundaries(countreach):ReachBoundaries(countreach+1));
-           y=yave(ReachBoundaries(countreach):ReachBoundaries(countreach+1));
-           w=wave(ReachBoundaries(countreach):ReachBoundaries(countreach+1));
+           xcoord=x(ReachBoundaries(countreach):ReachBoundaries(countreach+1),1)/1000;
+           yun=RiverObs.H(ReachBoundaries(countreach):ReachBoundaries(countreach+1),1);
+           y=yave(ReachBoundaries(countreach):ReachBoundaries(countreach+1),1);
+           w=wave(ReachBoundaries(countreach):ReachBoundaries(countreach+1),1);
            PolCoeff=polyfit(xcoord,yun,1);
            PredY = PolCoeff(1)*xcoord+PolCoeff(2); 
            %standard error for the reach averaged height
-           StandardErrorH(countreach)=std(PredY-yun);
+           StandardErrorH(1,countreach)=std(PredY-yun);
            %standard error for the slope
            %find the predicted points
            
@@ -439,13 +473,13 @@ function [Reach,RiverData,Metadata,ReachTrue,Nodes,NodesTrue]=ReachAveraging(Rea
            %following two lines)
            
            %s=sqrt(1/(length(x)-2)*sum((yun-PredY).^2));
-           %StandardErrorSlope(countreach)=s/sqrt(sum((x-mean(x)).^2))*100;
+           %StandardErrorSlope(countReach,1)=s/sqrt(sum((x-mean(x)).^2))*100;
            
            %Standard error computed using the idealized formula. 
            Sigmah=4.4;% cm from SWOT error budget
            L=Reach.L(countreach);
            W=Reach.W(countreach)/1000;
-           StandardErrorSlope(countreach)=2*pi()*sqrt(1/12*Sigmah^2./(W*L.^3));
+           StandardErrorSlope(1,countreach)=2*pi()*sqrt(1/12*Sigmah^2./(W*L.^3));
   
            %calculating the inundated area by making trapezoids with
            %successive width measurements
@@ -453,14 +487,14 @@ function [Reach,RiverData,Metadata,ReachTrue,Nodes,NodesTrue]=ReachAveraging(Rea
            for counter=2:length(w);
                area=area+(x(counter)-x(counter-1))*(w(counter)+w(counter-1))/2;
            end
-           ReachInundArea(count)=area/1000; %dividing by 1000 as width is in meters and length in km and I want result in km2
+           ReachInundArea(1,count)=area/1000; %dividing by 1000 as width is in meters and length in km and I want result in km2
            count=count+1;
         end
         RiverData.HeightUncertainty=StandardErrorH;
         RiverData.Width=Reach.W;
         RiverData.Slope=Reach.S*100; %multiplying by 100 to transform to cm/km
         RiverData.SlopeUncertainty=StandardErrorSlope;
-        RiverData.ReachInundArea=ReachInundArea';
+        RiverData.ReachInundArea=ReachInundArea;
         RiverData.ReachInundAreaUncertainty=zeros(size(RiverData.ReachInundArea)); %place holder
         RiverData.ReachDischarge=Reach.Q;
         RiverData.ReachDischargeUncertainty=zeros(size(RiverData.ReachDischarge)); %place holder
@@ -480,8 +514,8 @@ function [Reach,RiverData,Metadata,ReachTrue,Nodes,NodesTrue]=ReachAveraging(Rea
         RiverData.UpstreamReachID(1)=0; %nothing upstream
         RiverData.DownstreamReachID(length(RiverData.ReachID))=0; %nothing downstream
         for count=2:length(RiverData.ReachID)-1
-            RiverData.UpstreamReachID(count)=RiverData.ReachID(count-1);
-            RiverData.DownstreamReachID(count)=RiverData.ReachID(count+1);
+            RiverData.UpstreamReachID(1,count)=RiverData.ReachID(count-1);
+            RiverData.DownstreamReachID(1,count)=RiverData.ReachID(count+1);
         end
         RiverData.DistancefromOutlet=zeros(size(Reach.N)); %place holder
         for countreach=1:length(Reach.A)

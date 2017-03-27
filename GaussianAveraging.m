@@ -1,6 +1,16 @@
-function [ y, w ] = GaussianAveraging( x,y,w,WindowSize,sigma)
-%UNTITLED2 Summary of this function goes here
-%   Detailed explanation goes here
+function [ yave, wave ] = GaussianAveraging( x,y,w,WindowSize,sigma)
+%This function performs smoothing using Gaussian weigths
+%List of inputs:
+%x          : Flow distances associated with the nodes
+%y          : Water surface elevations
+%w          : River widths at the nodes
+%WindowSize : Size of the Window in the same units as x
+%sigma      : Standard deviation of the normal distribution used to assign
+%             the averaging weights
+
+%List of outputs:
+%yave       : smoothed elevations
+%wave       : smoothed widths
     yave=zeros(size(y));
     wave=zeros(size(y));
     for count=1:length(x)
@@ -18,14 +28,14 @@ function [ y, w ] = GaussianAveraging( x,y,w,WindowSize,sigma)
         for count2=first:last
             %average
             weight=normpdf(x(count2),x(count),sigma);
-            sumweight=sumweight+weight;
-            accy=accy+weight*y(count2);
-            accw=accw+weight*w(count2);
+            if ~isnan(y(count2)) %if y at that point is missing, don't use it in the averaging
+                sumweight=sumweight+weight;
+                accy=accy+weight*y(count2);
+                accw=accw+weight*w(count2);
+            end
         end
         yave(count)=accy/sumweight; %smoothed y, not the reach average
         wave(count)=accw/sumweight;
     end
-    y=yave; %smoothed y replaces the riverobs height
-    w=wave;
 end
 
